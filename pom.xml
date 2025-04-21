@@ -41,5 +41,11 @@
             <version>42.7.2</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.telegram</groupId>
+            <artifactId>telegrambots</artifactId>
+            <version>6.7.0</version> <!-- Убедитесь, что версия актуальна -->
+        </dependency>
+
     </dependencies>
 </project>

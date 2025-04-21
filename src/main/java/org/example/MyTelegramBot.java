@@ -3,13 +3,21 @@ package org.example;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
 import javax.validation.constraints.NotNull;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
+@SuppressWarnings("ALL")
 public class MyTelegramBot extends TelegramLongPollingBot {
-
+private final Map<Long, ScheduledFuture<?>> reminders = new HashMap<>();
+private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     // Состояния пользователя
     public enum UserState {
         AWAITING_GENDER,
@@ -28,7 +36,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         if (update.hasMessage() && update.getMessage().hasText()) {
             String messageText = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
-        //    String memberName = update.getMessage().getFrom().getFirstName();
+            //    String memberName = update.getMessage().getFrom().getFirstName();
             // Обработка команд
             switch (messageText) {
                 case "/start":
@@ -40,45 +48,101 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                 case "/history":
                     sendUserHistory(chatId);
                     break;
-                case "/help":
-                    sendHelpMessage(chatId);
+                case "/reminder_on":
+                    enableReminder(chatId);
+                    break;
+                case "/reminder_off":
+                    disableReminder(chatId);
                     break;
                 default:
                     handleUserInput(chatId, messageText);
             }
+        }else if (update.hasCallbackQuery()) {
+            // Обработка выбора пола
+            String callbackData = update.getCallbackQuery().getData();
+            long chatId = update.getCallbackQuery().getMessage().getChatId();
+            switch (callbackData) {
+                case "gender_male":
+                    userGenders.put(chatId, "мужской");
+                    userStates.put(chatId, UserState.AWAITING_HEIGHT);
+                    requestHeight(chatId);
+                    break;
+                    case "gender_female":
+                        userGenders.put(chatId, "женский");
+                        userStates.put(chatId, UserState.AWAITING_HEIGHT);
+                        requestHeight(chatId);
+                        break;
+                        default:
+                            sendMessage(chatId, "Неизвестный выбор. Попробуйте снова.");
+            }
         }
     }
+
+
     private void sendStartMessage(long chatId) {
         sendMessage(chatId, """
                 Привет! Я бот для расчета индекса массы тела (ИМТ).
                 Выберите одну из опций:
                 /imt - Рассчитать ИМТ
                 /history - Просмотреть историю расчетов
-                /help - Получить помощь
+                /reminder_on - Включить напоминание, о измерении ИМТ
+                /reminder_off - Выключить напоминание, о измерении ИМТ
                 """);
     }
 
+    private void sendGenderSelection(long chatId) {
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        // Кнопка "Мужской"
+        InlineKeyboardButton maleButton = new InlineKeyboardButton("Мужской");
+        maleButton.setCallbackData("gender_male");
+
+        // Кнопка "Женский"
+        InlineKeyboardButton femaleButton = new InlineKeyboardButton("Женский");
+        femaleButton.setCallbackData("gender_female");
+
+        // Добавляем кнопки в одну строку
+        rows.add(Arrays.asList(maleButton, femaleButton));
+        keyboard.setKeyboard(rows);
+
+        // Отправляем сообщение с клавиатурой
+        SendMessage message = new SendMessage();
+        message.setChatId(String.valueOf(chatId));
+        message.setText("Выберите ваш пол:");
+        message.setReplyMarkup(keyboard);
+
+        try {
+            execute(message);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     private void requestGender(long chatId) {
-        sendMessage(chatId, "Пожалуйста, укажите ваш пол (мужской/женский):");
+        sendGenderSelection(chatId);
         userStates.put(chatId, UserState.AWAITING_GENDER);
     }
 
     private void sendUserHistory(long chatId) {
         String history = dbHandler.getUserHistory(String.valueOf(chatId));
+        if (history == null || history.isEmpty()){
+            sendMessage(chatId, "Нет истории расчетов((.");
+        } else {
         sendMessage(chatId, history);
+    }
     }
 
     private void sendHelpMessage(long chatId) {
         sendMessage(chatId, """
-            Я могу помочь рассчитать ваш индекс массы тела (ИМТ) и предоставить рекомендации.
-            Используйте команды:
-            /imt - Рассчитать ИМТ
-            /history - Просмотреть историю расчетов  
-            """);
+                Я могу помочь рассчитать ваш индекс массы тела (ИМТ) и предоставить рекомендации.
+                Используйте команды:
+                /imt - Рассчитать ИМТ
+                /history - Просмотреть историю расчетов""");
     }
 
     private void handleUserInput(long chatId, String messageText) {
-        UserState currentState = userStates.getOrDefault(chatId, null);
+        UserState currentState = userStates.get(chatId);
 
         if (currentState == null) {
             sendMessage(chatId, "Неизвестная команда. Введите /help для справки.");
@@ -86,24 +150,15 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
 
         switch (currentState) {
-            case AWAITING_GENDER:
-                if (isValidGender(messageText)) {
-                    userGenders.put(chatId, messageText.toLowerCase());
-                    userStates.put(chatId, UserState.AWAITING_HEIGHT);
-                    requestHeight(chatId);
-                } else {
-                    sendMessage(chatId, "Неверный формат. Пожалуйста, укажите ваш пол (мужской/женский):");
-                }
-                break;
             case AWAITING_HEIGHT:
                 try {
                     double height = Double.parseDouble(messageText);
-                    if (height > 0) {
+                    if (height > 60 && height < 252) {
                         userHeights.put(chatId, height);
                         userStates.put(chatId, UserState.AWAITING_WEIGHT);
                         requestWeight(chatId);
                     } else {
-                        sendMessage(chatId, "Рост должен быть положительным числом. Попробуйте снова:");
+                        sendMessage(chatId, "Рост должен быть больше 60 и меньше 252см. Попробуйте снова:");
                     }
                 } catch (NumberFormatException e) {
                     sendMessage(chatId, "Ошибка: Пожалуйста, введите корректное число для роста:");
@@ -112,7 +167,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             case AWAITING_WEIGHT:
                 try {
                     double weight = Double.parseDouble(messageText);
-                    if (weight > 0) {
+                    if (weight > 30 && weight <200) {
                         double height = userHeights.get(chatId);
                         String gender = userGenders.get(chatId);
                         double bmi = calculateBMI(weight, height);
@@ -123,6 +178,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                                 Ваш ИМТ: %.2f
                                 Категория: %s
                                 Рекомендации: %s
+                                /history - Просмотреть историю расчетов
                                 """, bmi, interpretation, recommendations));
 
                         // Сохраняем результат в базе данных
@@ -133,7 +189,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                         userGenders.remove(chatId);
                         userHeights.remove(chatId);
                     } else {
-                        sendMessage(chatId, "Вес должен быть положительным числом. Попробуйте снова:");
+                        sendMessage(chatId, "Вес должен быть больше 30 и меньше 200кг. Попробуйте снова:");
                     }
                 } catch (NumberFormatException e) {
                     sendMessage(chatId, "Ошибка: Пожалуйста, введите корректное число для веса:");
@@ -194,7 +250,8 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             else if (bmi < 24.9) return "Отличный показатель! Поддерживайте здоровый образ жизни.";
             else if (bmi == 20.8) return "Идеальный показатель! Продолжайте здоровый образ жизни.";
             else if (bmi < 28.5) return "Обратите внимание на питание и физическую активность.";
-            else if (bmi < 39) return "Обратите внимание на питание и физическую активность. Проконсультируйтесь с врачом.";
+            else if (bmi < 39)
+                return "Обратите внимание на питание и физическую активность. Проконсультируйтесь с врачом.";
             else return "Обязательно проконсультируйтесь с врачом.";
         } else { // женский
             if (bmi < 16) return "Обязательно проконсультируйтесь с врачом.";
@@ -203,7 +260,8 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             else if (bmi < 24.99) return "Отличный показатель! Поддерживайте здоровый образ жизни.";
             else if (bmi == 22) return "Идеальный показатель! Продолжайте здоровый образ жизни.";
             else if (bmi < 29.99) return "Обратите внимание на питание и физическую активность.";
-            else if (bmi < 39.99) return "Обратите внимание на питание и физическую активность. Проконсультируйтесь с врачом.";
+            else if (bmi < 39.99)
+                return "Обратите внимание на питание и физическую активность. Проконсультируйтесь с врачом.";
             else return "Обязательно проконсультируйтесь с врачом.";
         }
     }
@@ -216,6 +274,34 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             execute(message);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    @SuppressWarnings("CallToPrintStackTrace")
+    private void enableReminder(long chatId) {
+        if (reminders.containsKey(chatId)) {
+            sendMessage(chatId, "Напоминание уже включчено.");
+            return;
+        }
+        Runnable reminderTask = () -> sendMessage(chatId, "Напоминание: Проверьте свой ИМТ с помощью команды /imt");
+
+        try{
+            ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(reminderTask, 30, 30, TimeUnit.DAYS);
+            reminders.put(chatId,future);
+            sendMessage(chatId, "напоминание включено. Вы будете получать уведомление о проверке раз в месяц.");
+            } catch (Exception e){
+                 sendMessage(chatId, "Произошла ошибка.");
+                 e.printStackTrace();
+            }
+    }
+
+    private void disableReminder(long chatId) {
+        ScheduledFuture<?> future = reminders.remove(chatId);
+        if (future != null) {
+            future.cancel(false);
+            sendMessage(chatId, "Напоминание отключено.");
+        } else {
+            sendMessage(chatId, "Напоминание не было включено.");
         }
     }
 
