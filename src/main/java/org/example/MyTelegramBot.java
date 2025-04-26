@@ -133,19 +133,11 @@ private final ScheduledExecutorService scheduler = Executors.newScheduledThreadP
     }
     }
 
-    private void sendHelpMessage(long chatId) {
-        sendMessage(chatId, """
-                Я могу помочь рассчитать ваш индекс массы тела (ИМТ) и предоставить рекомендации.
-                Используйте команды:
-                /imt - Рассчитать ИМТ
-                /history - Просмотреть историю расчетов""");
-    }
-
     private void handleUserInput(long chatId, String messageText) {
         UserState currentState = userStates.get(chatId);
 
         if (currentState == null) {
-            sendMessage(chatId, "Неизвестная команда. Введите /help для справки.");
+            sendMessage(chatId, "Неизвестная команда. Введите /start для справки.");
             return;
         }
 
@@ -153,12 +145,12 @@ private final ScheduledExecutorService scheduler = Executors.newScheduledThreadP
             case AWAITING_HEIGHT:
                 try {
                     double height = Double.parseDouble(messageText);
-                    if (height > 60 && height < 252) {
+                    if (height > 62 && height < 273) {
                         userHeights.put(chatId, height);
                         userStates.put(chatId, UserState.AWAITING_WEIGHT);
                         requestWeight(chatId);
                     } else {
-                        sendMessage(chatId, "Рост должен быть больше 60 и меньше 252см. Попробуйте снова:");
+                        sendMessage(chatId, "Рост должен быть больше 62см и меньше 273см. Попробуйте снова:");
                     }
                 } catch (NumberFormatException e) {
                     sendMessage(chatId, "Ошибка: Пожалуйста, введите корректное число для роста:");
@@ -167,7 +159,7 @@ private final ScheduledExecutorService scheduler = Executors.newScheduledThreadP
             case AWAITING_WEIGHT:
                 try {
                     double weight = Double.parseDouble(messageText);
-                    if (weight > 30 && weight <200) {
+                    if (weight > 27 && weight < 611) {
                         double height = userHeights.get(chatId);
                         String gender = userGenders.get(chatId);
                         double bmi = calculateBMI(weight, height);
@@ -189,7 +181,7 @@ private final ScheduledExecutorService scheduler = Executors.newScheduledThreadP
                         userGenders.remove(chatId);
                         userHeights.remove(chatId);
                     } else {
-                        sendMessage(chatId, "Вес должен быть больше 30 и меньше 200кг. Попробуйте снова:");
+                        sendMessage(chatId, "Вес должен быть больше 27кг и меньше 611кг. Попробуйте снова:");
                     }
                 } catch (NumberFormatException e) {
                     sendMessage(chatId, "Ошибка: Пожалуйста, введите корректное число для веса:");
@@ -207,11 +199,12 @@ private final ScheduledExecutorService scheduler = Executors.newScheduledThreadP
     }
 
     private void requestHeight(long chatId) {
-        sendMessage(chatId, "Введите ваш рост в сантиметрах (например, 175):");
+        sendMessage(chatId, "Введите ваш рост в сантиметрах (например, 175.5):");
     }
 
     private void requestWeight(long chatId) {
-        sendMessage(chatId, "Введите ваш вес в килограммах (например, 70):");
+
+        sendMessage(chatId, "Введите ваш вес в килограммах (например, 70.5):");
     }
 
 
